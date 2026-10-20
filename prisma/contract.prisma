@@ -1,0 +1,588 @@
+// use prisma-8
+// Connect Service Cloud data contract.
+// Lifecycle: Sales → Quote → Acceptance → Order → Validation → Feasibility
+// → Planning → Installation → Testing → Activation → Billing → Completion.
+// Business numbers (CUS-, QUO-, ORD-, SVC-, INV-) are unique per organisation
+// and are not primary keys.
+
+types {
+  Money    = Numeric(14, 2)
+  Currency = Char(3)
+  Geo      = Numeric(9, 6)
+}
+
+enum UserType {
+  INTERNAL
+  CUSTOMER
+}
+
+enum Role {
+  ADMIN
+  OPERATIONS
+  SALES
+  FINANCE
+  CUSTOMER_ADMIN
+  CUSTOMER_USER
+}
+
+enum CustomerStatus {
+  PROSPECT
+  ACTIVE
+  ON_HOLD
+  INACTIVE
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum OrderType {
+  ENTERPRISE
+  WHOLESALE
+  RESELLER
+  GOVERNMENT
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  ACCEPTED
+  VALIDATION
+  FEASIBILITY
+  PLANNING
+  INSTALLATION
+  TESTING
+  ACTIVATION
+  BILLING
+  COMPLETED
+  ON_HOLD
+  AT_RISK
+  CANCELLED
+  REJECTED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+enum ServiceType {
+  DEDICATED_FIBRE
+  BUSINESS_FIBRE
+  WHOLESALE
+  INTERNET
+  POINT_TO_POINT
+}
+
+enum ServiceStatus {
+  PENDING
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum DocumentCategory {
+  QUOTE
+  CONTRACT
+  PURCHASE_ORDER
+  IDENTIFICATION
+  SITE_DOCUMENT
+  INSTALLATION
+  ACCEPTANCE
+  INVOICE
+  OTHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum ActivityAction {
+  ORDER_CREATED
+  STATUS_CHANGED
+  QUOTE_ACCEPTED
+  FEASIBILITY_APPROVED
+  INSTALLATION_SCHEDULED
+  SERVICE_ACTIVATED
+  MESSAGE_SENT
+  DOCUMENT_UPLOADED
+  INVOICE_ISSUED
+}
+
+/// The company operating Connect Service Cloud. This is the tenant boundary.
+model Organisation {
+  id        Uuid     @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  users          User[]
+  customers      Customer[]
+  sites          Site[]
+  quotes         Quote[]
+  orders         Order[]
+  services       Service[]
+  messageThreads MessageThread[]
+  documents      Document[]
+  invoices       Invoice[]
+  activities     Activity[]
+}
+
+/// Platform identity. passwordHash stays empty while demo credentials are in use.
+model User {
+  id             Uuid     @id @default(uuid())
+  name           String
+  email          String
+  passwordHash   String?
+  role           Role
+  userType       UserType
+  organisationId Uuid
+  customerId     Uuid?
+  createdAt      DateTime @default(now())
+  updatedAt      temporal.updatedAt()
+
+  organisation       Organisation    @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer           Customer?       @relation("CustomerMember", fields: [customerId], references: [id], onDelete: Restrict)
+  managedCustomers   Customer[]      @relation("AccountManager")
+  quotesCreated      Quote[]         @relation("QuoteAuthor")
+  ordersCreated      Order[]         @relation("OrderCreator")
+  ordersAssigned     Order[]         @relation("OrderAssignee")
+  tasksAssigned      Task[]          @relation("TaskAssignee")
+  messages           Message[]
+  internalNotes      InternalNote[]
+  documentsUploaded  Document[]
+  activities         Activity[]
+  notifications      Notification[]
+
+  @@unique([organisationId, email])
+  @@index([email])
+  @@index([organisationId, role])
+  @@index([customerId])
+}
+
+/// An organisation that buys connectivity services.
+model Customer {
+  id               Uuid           @id @default(uuid())
+  customerNumber   String
+  name             String
+  legalName        String?
+  status           CustomerStatus @default(PROSPECT)
+  organisationId   Uuid
+  accountManagerId Uuid?
+  email            String?
+  phone            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        temporal.updatedAt()
+
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  accountManager User?        @relation("AccountManager", fields: [accountManagerId], references: [id], onDelete: SetNull)
+  users          User[]       @relation("CustomerMember")
+  sites          Site[]
+  quotes         Quote[]
+  orders         Order[]
+  services       Service[]
+  invoices       Invoice[]
+  documents      Document[]
+  activities     Activity[]
+
+  @@unique([organisationId, customerNumber])
+  @@index([organisationId, status])
+  @@index([accountManagerId])
+  @@index([email])
+  @@index([createdAt])
+}
+
+/// A physical location where connectivity is delivered.
+model Site {
+  id            Uuid     @id @default(uuid())
+  organisationId Uuid
+  customerId    Uuid
+  name          String
+  addressLine1  String
+  addressLine2  String?
+  city          String
+  province      String
+  postalCode    String
+  country       String
+  latitude      Geo?
+  longitude     Geo?
+  contactName   String?
+  contactPhone  String?
+  createdAt     DateTime @default(now())
+  updatedAt     temporal.updatedAt()
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  orderSites   OrderSite[]
+  services     Service[]
+
+  @@index([organisationId])
+  @@index([customerId])
+}
+
+/// Commercial proposal that can be accepted into an order.
+model Quote {
+  id             Uuid        @id @default(uuid())
+  quoteNumber    String
+  organisationId Uuid
+  customerId     Uuid
+  createdById    Uuid
+  status         QuoteStatus @default(DRAFT)
+  validUntil     Date?
+  subtotal       Money       @default(0)
+  tax            Money       @default(0)
+  total          Money       @default(0)
+  currency       Currency
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      temporal.updatedAt()
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation("QuoteAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  items        QuoteItem[]
+  orders       Order[]
+
+  @@unique([organisationId, quoteNumber])
+  @@index([organisationId, status])
+  @@index([customerId])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model QuoteItem {
+  id             Uuid     @id @default(uuid())
+  quoteId        Uuid
+  name           String
+  description    String?
+  quantity       Int
+  unitPrice      Money    @default(0)
+  recurringPrice Money    @default(0)
+  setupPrice     Money    @default(0)
+  createdAt      DateTime @default(now())
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+/// Central delivery record, from acceptance through activation and billing.
+model Order {
+  id                   Uuid        @id @default(uuid())
+  orderNumber          String
+  organisationId       Uuid
+  customerId           Uuid
+  quoteId              Uuid?
+  createdById          Uuid
+  assignedToId         Uuid?
+  orderType            OrderType
+  status               OrderStatus @default(DRAFT)
+  priority             Priority    @default(NORMAL)
+  requestedDate        Date?
+  targetActivationDate Date?
+  actualActivationDate Date?
+  currency             Currency
+  notes                String?
+  createdAt            DateTime    @default(now())
+  updatedAt            temporal.updatedAt()
+
+  organisation  Organisation     @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer      Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  quote         Quote?           @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  createdBy     User             @relation("OrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignedTo    User?            @relation("OrderAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  orderSites    OrderSite[]
+  items         OrderItem[]
+  tasks         Task[]
+  milestones    OrderMilestone[]
+  services      Service[]
+  threads       MessageThread[]
+  internalNotes InternalNote[]
+  documents     Document[]
+  invoices      Invoice[]
+  activities    Activity[]
+
+  @@unique([organisationId, orderNumber])
+  @@index([organisationId, status])
+  @@index([customerId])
+  @@index([quoteId])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([createdAt])
+}
+
+/// Links one order to one or more customer sites.
+model OrderSite {
+  id        Uuid     @id @default(uuid())
+  orderId   Uuid
+  siteId    Uuid
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  site  Site  @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, siteId])
+  @@index([siteId])
+}
+
+model OrderItem {
+  id             Uuid     @id @default(uuid())
+  orderId        Uuid
+  name           String
+  description    String?
+  quantity       Int
+  recurringPrice Money    @default(0)
+  setupPrice     Money    @default(0)
+  createdAt      DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+/// Operational work assigned to an internal user.
+model Task {
+  id           Uuid       @id @default(uuid())
+  orderId      Uuid
+  title        String
+  description  String?
+  status       TaskStatus @default(TODO)
+  priority     Priority   @default(NORMAL)
+  assignedToId Uuid?
+  dueDate      DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    temporal.updatedAt()
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assignedTo User? @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, status])
+  @@index([assignedToId])
+}
+
+/// An order-specific delivery stage. Names are stored per order, not as global rows.
+model OrderMilestone {
+  id          Uuid            @id @default(uuid())
+  orderId     Uuid
+  name        String
+  status      MilestoneStatus @default(PENDING)
+  sequence    Int
+  completedAt DateTime?
+  createdAt   DateTime        @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, sequence])
+  @@index([orderId, status])
+}
+
+/// A connectivity service produced by an order at a site.
+model Service {
+  id                      Uuid          @id @default(uuid())
+  serviceNumber           String
+  organisationId          Uuid
+  customerId              Uuid
+  orderId                 Uuid
+  siteId                  Uuid
+  name                    String
+  serviceType             ServiceType
+  bandwidth               String?
+  status                  ServiceStatus @default(PENDING)
+  activationDate          Date?
+  monthlyRecurringCharge  Money         @default(0)
+  createdAt               DateTime      @default(now())
+  updatedAt               temporal.updatedAt()
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  site         Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, serviceNumber])
+  @@index([organisationId, status])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([siteId])
+}
+
+/// Customer-visible conversation about an order.
+model MessageThread {
+  id             Uuid     @id @default(uuid())
+  organisationId Uuid
+  orderId        Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      temporal.updatedAt()
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@index([orderId])
+  @@index([organisationId])
+}
+
+model Message {
+  id        Uuid      @id @default(uuid())
+  threadId  Uuid
+  senderId  Uuid
+  body      String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  @@index([threadId, createdAt])
+  @@index([senderId])
+}
+
+/// Operational notes that are never shown in the customer portal.
+model InternalNote {
+  id        Uuid     @id @default(uuid())
+  orderId   Uuid
+  authorId  Uuid
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+}
+
+/// File metadata only. storageKey is the future object-storage reference.
+model Document {
+  id             Uuid             @id @default(uuid())
+  name           String
+  fileName       String
+  fileType       String
+  storageKey     String
+  category       DocumentCategory
+  uploadedById   Uuid
+  organisationId Uuid
+  customerId     Uuid?
+  orderId        Uuid?
+  createdAt      DateTime         @default(now())
+
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  organisation Organisation  @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, category])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+model Invoice {
+  id            Uuid          @id @default(uuid())
+  invoiceNumber String
+  organisationId Uuid
+  customerId    Uuid
+  orderId       Uuid?
+  status        InvoiceStatus @default(DRAFT)
+  issueDate     Date
+  dueDate       Date
+  subtotal      Money         @default(0)
+  tax           Money         @default(0)
+  total         Money         @default(0)
+  amountPaid    Money         @default(0)
+  currency      Currency
+  createdAt     DateTime      @default(now())
+  updatedAt     temporal.updatedAt()
+
+  organisation Organisation  @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  items        InvoiceItem[]
+
+  @@unique([organisationId, invoiceNumber])
+  @@index([organisationId, status])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([dueDate])
+}
+
+model InvoiceItem {
+  id          Uuid   @id @default(uuid())
+  invoiceId   Uuid
+  description String
+  quantity    Int
+  unitPrice   Money
+  amount      Money
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// Audit events. metadata holds event-specific detail as JSON.
+model Activity {
+  id             Uuid           @id @default(uuid())
+  organisationId Uuid
+  actorId        Uuid?
+  orderId        Uuid?
+  customerId     Uuid?
+  action         ActivityAction
+  description    String
+  metadata       Jsonb?
+  createdAt      DateTime       @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  order        Order?       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, createdAt])
+  @@index([orderId])
+  @@index([customerId])
+  @@index([actorId])
+}
+
+model Notification {
+  id        Uuid      @id @default(uuid())
+  userId    Uuid
+  type      String
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
