@@ -218,9 +218,10 @@ export const portalShell: ShellConfig = {
           title: "Overview",
           href: "/portal",
           icon: LayoutDashboard,
-          description: "A snapshot of your orders, services, and account.",
+          description: "Track your connectivity delivery from order to activation.",
           emptyTitle: "Nothing to show",
           emptyDescription: "Account activity will appear on this overview.",
+          ownsHeader: true,
         },
         {
           title: "My Orders",
@@ -230,6 +231,7 @@ export const portalShell: ShellConfig = {
           emptyTitle: "No orders",
           emptyDescription:
             "Orders you place will appear here with their current progress.",
+          ownsHeader: true,
         },
         {
           title: "Services",

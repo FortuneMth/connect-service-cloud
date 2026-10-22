@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ActivationReadiness } from "@/components/service-delivery/activation-readiness";
 import { DeliveryAttention } from "@/components/service-delivery/delivery-attention";
 import { DeliveryBlockers } from "@/components/service-delivery/delivery-blockers";
+import { DeliveryEscalations } from "@/components/service-delivery/delivery-escalations";
 import { DeliveryFilters, type DeliveryFilterState } from "@/components/service-delivery/delivery-filters";
 import { DeliveryKpis } from "@/components/service-delivery/delivery-kpis";
 import { DeliveryPipeline } from "@/components/service-delivery/delivery-pipeline";
@@ -62,6 +63,7 @@ export function ServiceDeliveryWorkspace() {
         onSelect={(stage) => setFilters((current) => ({ ...current, stage }))}
       />
       <DeliveryAttention tasks={book.tasks} />
+      <DeliveryEscalations />
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-sm font-medium">Delivery work queue</h2>
